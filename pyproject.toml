@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-icc"
+version = "0.1.0"
+description = "LLM-simulated item characteristic curves (arXiv:2601.02580) on the USMLE item set"
+requires-python = ">=3.10"
+dependencies = [
+  "torch", "transformers", "peft", "accelerate", "numpy", "scipy", "pandas",
+  "pyarrow", "openpyxl", "pyyaml", "pydantic>=2", "matplotlib", "tqdm", "pytest",
+]
+
+[project.optional-dependencies]
+tracking = ["tensorboard", "wandb"]
+
+[tool.setuptools.packages.find]
+include = ["llm_icc*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

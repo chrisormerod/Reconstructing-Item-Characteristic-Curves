@@ -1,0 +1,12 @@
+results/
+logs/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+checkpoints/
+*.safetensors
+*.pt
+.cache/
+wandb/
+runs/

@@ -1,0 +1,5 @@
+base: default.yaml
+run:
+  name: usmle_qwen3_8b
+pretrained_model:
+  name_or_path: Qwen/Qwen3-8B

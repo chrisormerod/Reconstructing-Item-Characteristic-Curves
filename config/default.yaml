@@ -1,0 +1,81 @@
+run:
+  name: default
+  seed: 1234
+  results_dir: results/
+  logs_dir: logs/
+
+data:
+  usmle_dir: /mnt/c/data/idm/usmle     # holds train_final.xlsx, test_final.xlsx, gold_final.xlsx
+  splits:
+    strategy: predefined       # predefined | kfold
+    k: 5                       # kfold only
+    dev_fraction: 0.1          # fraction of the training items held out as dev
+  exclude_pix: false           # true drops ItemType == PIX items (stems that refer to a missing picture)
+  difficulty_transform:        # provisional Difficulty -> training-target b
+    method: standardize        # standardize | linear
+    shift: 0.0                 # linear only: b = scale * (Difficulty - shift)
+    scale: 1.0                 # standardize: shift/scale are the mean/SD of the training items' Difficulty
+
+pretrained_model:
+  name_or_path: Qwen/Qwen3-4B  # sized for a single 24-48 GB GPU
+  dtype: bfloat16              # bfloat16 | float16
+  max_length: 2048
+  gradient_checkpointing: true
+  enable_thinking: false       # Qwen3 chat-template flag
+  attn_implementation: sdpa
+  predict_batch_size: 10       # descriptors per forward pass at prediction time
+
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj]
+  bias: none
+
+training:
+  epochs: 3                    # maximum stage-2 epochs; early stopping may end sooner
+  learning_rate: 5.0e-6        # stage 2 (distribution correction)
+  batch_size: 1
+  gradient_accumulation_steps: 8
+  weight_decay: 0.0
+  warmup_ratio: 0.03
+  max_grad_norm: 1.0
+  eval_every_steps: 500        # optimizer steps
+  early_stopping_patience: 3
+  sft:
+    enabled: true
+    epochs: 1
+    learning_rate: 5.0e-5
+
+population:                    # theta ~ N(mu, sigma^2); assumed standard normal
+  mu: 0.0
+  sigma: 1.0
+
+calibration:
+  icc_models: [1PL]            # first entry is used for the reported metrics; 2PL has no reference `a`
+  linear_recalibration: true
+
+report:
+  n_icc_plots: 12              # test-item ICC plots per split
+
+descriptors:                   # ordered: lowest -> highest; [lower, upper]
+  Critical:          [-.inf, -3.0]
+  Severely Limited:  [-3.0, -2.7]
+  Deficient:         [-2.7, -2.4]
+  Inadequate:        [-2.4, -2.1]
+  Minimal:           [-2.1, -1.8]
+  Emerging:          [-1.8, -1.2]   # paper lists (-1.5, -1.2), leaving a gap; closed by extending down
+  Developing:        [-1.2, -0.9]
+  Approaching Basic: [-0.9, -0.6]
+  Basic:             [-0.6, -0.3]
+  Functional:        [-0.3, 0.0]
+  Satisfactory:      [0.0, 0.3]
+  Competent:         [0.3, 0.6]
+  Proficient:        [0.6, 0.9]
+  Accomplished:      [0.9, 1.2]
+  Advanced:          [1.2, 1.5]
+  Superior:          [1.5, 1.8]
+  Exceptional:       [1.8, 2.1]
+  Outstanding:       [2.1, 2.4]
+  Distinguished:     [2.4, 2.7]
+  Exemplary:         [2.7, .inf]
