@@ -137,7 +137,7 @@ llm-icc/
 │   │
 │   └── utils/                     # Parsing, system, CLI, results, reporting
 │       ├── __init__.py
-│       ├── usmle.py               # USMLEParser: USMLE spreadsheets → ItemBank
+│       ├── usmle.py               # USMLEParser: configurable tabular files (USMLE layout by default) → ItemBank
 │       ├── system.py              # seeding, device/dtype, GPU memory, git hash, run dirs
 │       ├── cli.py                 # argparse definition
 │       ├── logging_utils.py       # console + file logging, optional W&B/TensorBoard
@@ -322,7 +322,10 @@ run:
   logs_dir: logs/
 
 data:
-  usmle_dir: /mnt/c/data/idm/usmle     # holds train_final.xlsx, test_final.xlsx, gold_final.xlsx
+  dir: /mnt/c/data/idm/usmle           # `usmle_dir` is a deprecated alias
+  files:   {train: train_final.xlsx, test: test_final.xlsx, gold: gold_final.xlsx}   # .xlsx/.csv/.tsv/.parquet; gold: null = test file has difficulty
+  columns: {id: ItemNum, stem: ItemStem_Text, option_prefix: "Answer__", key: Answer_Key, key_text: Answer_Text,
+            item_type: ItemType, exam: EXAM, difficulty: Difficulty}   # key_text, item_type, exam may be null
   splits:
     strategy: predefined       # predefined | kfold
     k: 5                       # kfold only
@@ -512,7 +515,7 @@ Each step: forward → restricted softmax → `weighted_distribution_mse` → ba
 
 ## 8. Utilities (`llm_icc/utils/`)
 
-- **`usmle.py` — `USMLEParser`:** reads the three spreadsheets and produces an `ItemBank` of `Item` objects. It sits behind an `ItemSource` ABC so other formats can be added without touching the pipeline. The format is documented in `docs/usmle_format.md`.
+- **`usmle.py` — `USMLEParser`:** reads the train, test and (optional) gold files and produces an `ItemBank` of `Item` objects. File names (`data.files`) and column names (`data.columns`) are configurable, and `.xlsx`, `.csv`, `.tsv` and `.parquet` are read by extension; the defaults below are the USMLE layout. A missing mapped column raises an error naming it. It sits behind an `ItemSource` ABC so other formats can be added without touching the pipeline. The format is documented in `docs/usmle_format.md`.
 
   **USMLE format** (`/mnt/c/data/idm/usmle/`, one sheet per file):
 
@@ -564,7 +567,7 @@ python scripts/run_all.py [--models ...] [--seeds ...] [--preflight|--aggregate-
 ### Pipeline (`llm_icc/app.py`)
 
 1. **Setup:** load and validate config; seed; create run directory; log environment and git hash.
-2. **Parse:** `USMLEParser(config.data.usmle_dir).load()` → `ItemBank`; report counts, option-count distribution, PIX items, and exam steps.
+2. **Parse:** `USMLEParser(config.data.dir, config.data.files, config.data.columns).load()` → `ItemBank`; report counts, option-count distribution, PIX items, and exam steps.
 3. **Build targets:** convert each item's `b` to NRM (eq. 4); compute θ_k, ω_k from `population`; materialize (N, n) targets per item; save to results.
 4. **Split:** build the predefined split or k-fold splits.
 5. **Per split:**

@@ -5,7 +5,20 @@ run:
   logs_dir: logs/
 
 data:
-  usmle_dir: /mnt/c/data/idm/usmle     # holds train_final.xlsx, test_final.xlsx, gold_final.xlsx
+  dir: /mnt/c/data/idm/usmle           # directory holding the three files below (`usmle_dir` is a deprecated alias)
+  files:                       # .xlsx/.xls, .csv, .tsv or .parquet, chosen by extension
+    train: train_final.xlsx    # items with difficulty (train + dev)
+    test: test_final.xlsx      # test items
+    gold: gold_final.xlsx      # test difficulties joined on `id`; null if the test file already has them
+  columns:                     # null disables an optional column
+    id: ItemNum
+    stem: ItemStem_Text
+    option_prefix: "Answer__"  # options are <prefix>A ... <prefix>J, contiguous from A
+    key: Answer_Key
+    key_text: Answer_Text      # optional: warns when it differs from the keyed option
+    item_type: ItemType        # optional: Text | PIX
+    exam: EXAM                 # optional
+    difficulty: Difficulty
   splits:
     strategy: predefined       # predefined | kfold
     k: 5                       # kfold only

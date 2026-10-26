@@ -1,6 +1,7 @@
 # USMLE input format
 
-Directory `data.usmle_dir`, one sheet per file (read with openpyxl; `~$*.xlsx` lock files are ignored).
+Directory `data.dir`, one sheet per file (read with openpyxl; `~$*.xlsx` lock files are ignored). Everything below
+is the default; file names come from `data.files` and column names from `data.columns` (see "Configuring" at the end).
 
 | File | Rows | Columns used | Role |
 |------|------|--------------|------|
@@ -17,3 +18,21 @@ Directory `data.usmle_dir`, one sheet per file (read with openpyxl; `~$*.xlsx` l
 - `ItemType` (`Text`/`PIX`) and `EXAM` go to `item.metadata`. PIX stems refer to a missing picture; keep them
   (default) or drop them with `data.exclude_pix: true`.
 - `Difficulty`: higher = harder. Stored in `reference_difficulty`; converted by `data.difficulty_transform`.
+
+## Configuring
+
+```yaml
+data:
+  dir: /path/to/data
+  files:   {train: train.csv, test: test.csv, gold: null}   # .xlsx/.xls, .csv, .tsv, .parquet by extension
+  columns: {id: id, stem: question, option_prefix: "opt_", key: key, key_text: null,
+            item_type: null, exam: null, difficulty: p_hard}
+```
+
+- Options are the columns `<option_prefix>A` … `<option_prefix>J` (contiguous from A, 4–10 per item).
+- `files.gold: null` means the test file has its own `difficulty` column; otherwise the gold file (`id`, `difficulty`)
+  is joined to the test file on `id`.
+- `key_text`, `item_type` and `exam` are optional (`null` turns them off). Without `item_type`, `data.exclude_pix` does
+  nothing.
+- A missing mapped column raises an error naming it. Unmapped columns are never read.
+- `data.usmle_dir` is still accepted as an alias of `data.dir`.

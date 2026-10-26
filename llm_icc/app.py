@@ -287,7 +287,7 @@ def run(config: Config, args) -> Path:
     results.write_config(config, run_dir / "config.resolved.yaml")
     log.info("run dir %s | git %s", run_dir, system.git_commit_hash())
 
-    bank = USMLEParser(config.data.usmle_dir).load()
+    bank = USMLEParser(config.data.dir, config.data.files, config.data.columns).load()
     if config.data.exclude_pix:
         bank = bank.filter(lambda i: i.metadata["item_type"] != "PIX")
     log.info("parsed: %s", describe_bank(bank))

@@ -41,11 +41,40 @@ class DifficultyTransformConfig(_Base):
         return v
 
 
+class DataFilesConfig(_Base):
+    """File names inside `data.dir`; .xlsx/.xls, .csv, .tsv and .parquet are read by extension."""
+    train: str = "train_final.xlsx"
+    test: str = "test_final.xlsx"
+    gold: str | None = "gold_final.xlsx"          # null: the test file carries its own difficulty column
+
+
+class DataColumnsConfig(_Base):
+    """Column names in the item files. Options are read from `<option_prefix>A` ... `<option_prefix>J`."""
+    id: str = "ItemNum"
+    stem: str = "ItemStem_Text"
+    option_prefix: str = "Answer__"
+    key: str = "Answer_Key"
+    key_text: str | None = "Answer_Text"          # null: skip the key/text consistency check
+    item_type: str | None = "ItemType"            # null: no item types (exclude_pix then has no effect)
+    exam: str | None = "EXAM"
+    difficulty: str = "Difficulty"                # train file, and gold (or test) file
+
+
 class DataConfig(_Base):
-    usmle_dir: str = "/mnt/c/data/idm/usmle"
+    dir: str = "/mnt/c/data/idm/usmle"
+    files: DataFilesConfig = DataFilesConfig()
+    columns: DataColumnsConfig = DataColumnsConfig()
     splits: SplitConfig = SplitConfig()
     exclude_pix: bool = False
     difficulty_transform: DifficultyTransformConfig = DifficultyTransformConfig()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _usmle_dir_alias(cls, v):
+        if isinstance(v, dict) and "usmle_dir" in v:  # deprecated name of `dir`
+            v = dict(v)
+            v["dir"] = v.pop("usmle_dir")  # an explicit (or overriding) usmle_dir wins over a base config's `dir`
+        return v
 
 
 class PretrainedModelConfig(_Base):

@@ -29,9 +29,17 @@ descriptors and the default config has 21 (it adds `Rudimentary` to close a gap 
 
 ## Data
 
-`data.usmle_dir` (default `/mnt/c/data/idm/usmle/`) must hold `train_final.xlsx`, `test_final.xlsx` and
-`gold_final.xlsx` ([format](docs/usmle_format.md)). `python scripts/simulate_usmle.py OUT_DIR` writes synthetic
-spreadsheets in the same format.
+Set `data.dir` (default `/mnt/c/data/idm/usmle/`) to the directory holding the train, test and gold files. File
+names (`data.files`) and column names (`data.columns`) are configurable, and `.xlsx`, `.csv`, `.tsv` and `.parquet`
+are read by extension, so another dataset only needs a config change, e.g.
+
+```bash
+python main.py --config config/default.yaml --set data.dir=/path --set data.files.train=tr.csv \
+    --set data.files.test=te.csv --set data.files.gold=null --set data.columns.stem=question
+```
+
+Defaults and parsing rules: [docs/usmle_format.md](docs/usmle_format.md). `python scripts/simulate_usmle.py OUT_DIR`
+writes synthetic spreadsheets in the default format.
 
 ## Run
 
