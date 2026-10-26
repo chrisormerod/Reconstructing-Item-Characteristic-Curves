@@ -17,9 +17,18 @@ from llm_icc.modeling.prompts import PromptBuilder
 _DTYPES = {"bfloat16": torch.bfloat16, "float16": torch.float16}
 
 
+def _bnb_config(mode: str, compute_dtype):
+    from transformers import BitsAndBytesConfig
+
+    if mode == "8bit":
+        return BitsAndBytesConfig(load_in_8bit=True)
+    return BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
+                              bnb_4bit_compute_dtype=compute_dtype)
+
+
 class LoRAResponseSimulator(ResponseSimulator):
     def __init__(self, config, adapter_path: Path | None = None):
-        from peft import LoraConfig, PeftModel, get_peft_model
+        from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         self.config = config
@@ -35,10 +44,16 @@ class LoRAResponseSimulator(ResponseSimulator):
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         dtype = _DTYPES[pm.dtype] if device == "cuda" else torch.float32
+        quant = pm.quantization != "none"
+        if quant and device != "cuda":
+            raise RuntimeError("pretrained_model.quantization needs a CUDA device (bitsandbytes)")
         base = AutoModelForCausalLM.from_pretrained(
-            pm.name_or_path, dtype=dtype, attn_implementation=pm.attn_implementation)
+            pm.name_or_path, dtype=dtype, attn_implementation=pm.attn_implementation,
+            **({"quantization_config": _bnb_config(pm.quantization, dtype), "device_map": {"": 0}} if quant else {}))
         base.config.use_cache = False
-        if pm.gradient_checkpointing:
+        if quant:  # fp32 norms/embeddings, input grads, and gradient checkpointing if requested
+            base = prepare_model_for_kbit_training(base, use_gradient_checkpointing=pm.gradient_checkpointing)
+        elif pm.gradient_checkpointing:
             base.gradient_checkpointing_enable()
             base.enable_input_require_grads()
         if adapter_path is not None:
@@ -48,7 +63,8 @@ class LoRAResponseSimulator(ResponseSimulator):
             self.model = get_peft_model(base, LoraConfig(
                 r=lc.r, lora_alpha=lc.alpha, lora_dropout=lc.dropout, target_modules=lc.target_modules,
                 bias=lc.bias, task_type="CAUSAL_LM"))
-        self.model.to(device)
+        if not quant:  # quantized weights are already on the GPU and cannot be moved
+            self.model.to(device)
         self.device = torch.device(device)
 
     # ---- forward ----

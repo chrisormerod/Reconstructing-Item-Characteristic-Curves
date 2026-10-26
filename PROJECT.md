@@ -56,7 +56,7 @@ Two stages (paper §3.2):
 
    L = Σ_k ω_k · Σ_i ( p̂_ik − P_ik )²
 
-   lr 5e-6, linear schedule, gradient clipping, early stopping on the ω-weighted dev loss. Each item appears once per descriptor per epoch (N = 20 exposures).
+   lr 5e-6, linear schedule, gradient clipping, early stopping on the ω-weighted dev loss. Each item appears once per descriptor per epoch (N exposures, N = number of descriptors: 21 in the default config, 20 in the article).
 
 ### 2.5 Recovering item parameters
 
@@ -89,8 +89,12 @@ llm-icc/
 │
 ├── config/                        # Configuration files (YAML)
 │   ├── default.yaml
-│   ├── usmle_qwen3_4b.yaml
-│   └── usmle_qwen3_8b.yaml
+│   ├── usmle_qwen3_{1_7b,4b,8b,14b,32b}.yaml   # 32b: quantization 4bit
+│   ├── usmle_qwen3_14b_nf4.yaml   # 14B in 4-bit, to isolate the effect of quantization
+│   ├── usmle_llama31_8b.yaml      # pins chat_template_kwargs.date_string
+│   ├── usmle_roberta_large.yaml   # Maeda (2023) variant
+│   ├── usmle_modernbert_regression.yaml   # run.method: regression
+│   └── usmle_features.yaml        # run.method: features
 │
 ├── llm_icc/
 │   ├── __init__.py
@@ -110,14 +114,17 @@ llm-icc/
 │   │   ├── item_bank.py           # ItemBank (collection + splits)
 │   │   └── torch_datasets.py      # SFTDataset, DistributionDataset, collators
 │   │
-│   ├── modeling/                  # Solely LoRA modeling and fine-tuning
+│   ├── modeling/                  # LoRA/RoBERTa simulators, regression baselines, fine-tuning
 │   │   ├── __init__.py
 │   │   ├── base.py                # ResponseSimulator (ABC)
-│   │   ├── lora_simulator.py      # LoRAResponseSimulator (HF + PEFT wrapper)
+│   │   ├── lora_simulator.py      # LoRAResponseSimulator (HF + PEFT wrapper; optional bitsandbytes 4/8-bit)
+│   │   ├── roberta_simulator.py   # RobertaResponseSimulator (vocabulary-ablation ability, Maeda 2023)
+│   │   ├── regression_baseline.py # RegressionModel: ModernBERT + one-output head, MSE on b
+│   │   ├── features_baseline.py   # FeaturesModel: TF-IDF + textstat features -> ridge on b
 │   │   ├── prompts.py             # PromptBuilder (Appendix A templates, chat template)
 │   │   ├── option_tokens.py       # OptionTokenizer: option key ↔ single token id
 │   │   ├── losses.py              # weighted_distribution_mse, sft_cross_entropy
-│   │   ├── training_loop.py       # DistributionTrainer, SFTTrainer (manual loops)
+│   │   ├── training_loop.py       # DistributionTrainer, SFTTrainer, RegressionTrainer (manual loops)
 │   │   └── early_stopping.py      # EarlyStopping, checkpoint selection
 │   │
 │   ├── irt/                       # All IRT-related tools
@@ -134,14 +141,16 @@ llm-icc/
 │       ├── system.py              # seeding, device/dtype, GPU memory, git hash, run dirs
 │       ├── cli.py                 # argparse definition
 │       ├── logging_utils.py       # console + file logging, optional W&B/TensorBoard
-│       ├── metrics.py             # Pearson, RMSE, weighted MSE
+│       ├── metrics.py             # Pearson, RMSE, bias, bootstrap_ci (percentile), weighted MSE
 │       ├── results.py             # write/read parameter tables, ICC tables, predictions
 │       └── reporting.py           # ICC plots (Fig. 3 style), summary tables
 │
 ├── scripts/                       # Other tools
 │   ├── simulate_usmle.py          # synthetic USMLE-format spreadsheets (known b) for end-to-end tests
 │   ├── check_option_tokens.py     # verify option keys A–J are single tokens for a tokenizer
-│   └── summarize_runs.py          # aggregate metrics across runs/folds
+│   ├── summarize_runs.py          # aggregate metrics across runs/folds
+│   ├── repeat_runs.py             # one config over several seeds -> mean/SD/min/max table
+│   └── run_all.py                 # every Table 4 model x seeds on one GPU, --preflight, results/table4.{csv,md,tex}
 │
 ├── tests/
 │   ├── test_descriptors.py
@@ -149,6 +158,11 @@ llm-icc/
 │   ├── test_icc_fit.py
 │   ├── test_losses.py
 │   ├── test_prompts.py
+│   ├── test_metrics.py            # bias, bootstrap CI
+│   ├── test_features_baseline.py
+│   ├── test_regression_baseline.py
+│   ├── test_roberta_simulator.py
+│   ├── test_training_loop.py
 │   └── test_usmle_parser.py
 │
 ├── docs/                          # Documentation
@@ -303,6 +317,7 @@ One YAML file per experiment, validated by `llm_icc/config/schema.py`. Any key c
 run:
   name: default
   seed: 1234
+  method: icc                  # icc | regression (ModernBERT) | features (TF-IDF + textstat -> ridge)
   results_dir: results/
   logs_dir: logs/
 
@@ -319,12 +334,16 @@ data:
     scale: 1.0                 # standardize: shift/scale are the mean/SD of the training items' Difficulty
 
 pretrained_model:
+  architecture: causal_lm      # causal_lm (LoRA LLM) | roberta_mc
   name_or_path: Qwen/Qwen3-4B  # sized for a single 24-48 GB GPU
-  dtype: bfloat16              # bfloat16 | float16
+  dtype: bfloat16              # bfloat16 | float16 (compute dtype when quantized)
+  quantization: none           # none | 8bit | 4bit (bitsandbytes QLoRA; CUDA only; 4bit = NF4 + double quant)
   max_length: 2048
   gradient_checkpointing: true
   enable_thinking: false       # Qwen3 chat-template flag
+  chat_template_kwargs: {}     # extra template variables, e.g. Llama 3.1 date_string
   attn_implementation: sdpa
+  predict_batch_size: 10       # descriptors per forward pass at prediction time
 
 lora:
   r: 32
@@ -356,13 +375,30 @@ calibration:
   icc_models: [1PL]            # 2PL is supported by ICCFitter but has no reference `a` in the data
   linear_recalibration: true
 
+report:
+  n_icc_plots: 12
+  bootstrap_n: 10000           # percentile-bootstrap resamples over test items for the RMSE / bias CIs
+  ci_level: 0.95
+
+roberta: {ablation_samples: 10, protect_special_tokens: true, include_correct_answer: true}   # roberta_mc only
+regression: {max_length: 1024, include_correct_answer: true}                                   # run.method: regression
+features:                      # run.method: features
+  tfidf_max_features: 5000
+  ngram_max: 2
+  tfidf_min_df: 2
+  numeric_weight: 1.0          # scale of the standardized textstat/option block relative to TF-IDF
+  alpha_log10_min: -2.0        # ridge penalty grid 10**[min, max], 13 points, chosen by leave-one-out CV
+  alpha_log10_max: 4.0
+  include_correct_answer: true
+
 descriptors:                   # ordered: lowest → highest; [lower, upper]
   Critical:          [-.inf, -3.0]
   Severely Limited:  [-3.0, -2.7]
   Deficient:         [-2.7, -2.4]
   Inadequate:        [-2.4, -2.1]
   Minimal:           [-2.1, -1.8]
-  Emerging:          [-1.8, -1.2]   # paper lists (-1.5, -1.2), leaving a gap; closed by extending down
+  Rudimentary:       [-1.8, -1.5]   # paper leaves (-1.8, -1.5) unlabeled; bridged with this label (21 descriptors)
+  Emerging:          [-1.5, -1.2]
   Developing:        [-1.2, -0.9]
   Approaching Basic: [-0.9, -0.6]
   Basic:             [-0.6, -0.3]
@@ -379,7 +415,7 @@ descriptors:                   # ordered: lowest → highest; [lower, upper]
   Exemplary:         [2.7, .inf]
 ```
 
-Validation rules: descriptors must be in ascending order, contiguous (each `lower` equals the previous `upper`), first `lower = -inf`, last `upper = +inf`, labels unique. YAML mapping order is preserved and is significant.
+Per-experiment files set `base: default.yaml` and override only what differs. Other sections not shown (`lora` for `roberta_mc`, `training.sft`) keep their defaults. Validation rules: descriptors must be in ascending order, contiguous (each `lower` equals the previous `upper`), first `lower = -inf`, last `upper = +inf`, labels unique. YAML mapping order is preserved and is significant.
 
 ---
 
@@ -416,9 +452,19 @@ class ResponseSimulator(ABC):
 
 Wraps `AutoModelForCausalLM` + `peft.LoraConfig`/`get_peft_model`. Responsibilities: load base model in configured dtype; attach adapters to `target_modules`; run a forward pass and take logits at the last non-pad position of each prompt; gather logits at the option token ids; expose `option_probabilities`, `predict_icc`, and adapter save/load. Only adapter weights are saved.
 
+With `pretrained_model.quantization: 4bit|8bit` the base model is loaded through bitsandbytes (`BitsAndBytesConfig`: NF4 with double quantization and `dtype` as compute type for 4-bit) with `device_map={"": 0}`, prepared with `prepare_model_for_kbit_training` (fp32 norms/embeddings, input grads, gradient checkpointing) and not moved with `.to(device)`; LoRA adapters stay 16/32-bit (QLoRA). This is what makes Qwen3-32B trainable on one 48 GB GPU (~61 GiB in bf16, ~24 GiB in NF4). It needs CUDA and the `quant` extra.
+
+### 6.2a Other models behind the same interfaces
+
+- **`RobertaResponseSimulator`** (`architecture: roberta_mc`): `FacebookAI/roberta-large` as a multiple-choice model, fully fine-tuned. Ability is simulated by zeroing the word embeddings of a random share of the vocabulary: descriptor k keeps a fraction Φ(θ_k); the ICC averages `roberta.ablation_samples` ablations (Maeda 2023, arXiv:2310.11655).
+- **`RegressionModel`** (`run.method: regression`): ModernBERT with a one-output head fine-tuned with MSE on `b` by `RegressionTrainer`; it has no ICC and is scored only through the predicted Difficulty.
+- **`FeaturesModel`** (`run.method: features`): no neural network. Text = stem + lettered options (+ key). TF-IDF (1–2-grams, sublinear tf) is stacked with standardized numeric features: textstat readability (Flesch ease, Flesch-Kincaid, Gunning fog, SMOG, ARI, Coleman-Liau, Dale-Chall), counts (syllables, words, sentences, characters, difficult words), words per sentence and syllables per word of the stem, and option statistics (number of options, mean/max option length, correct-option length and its difference from the distractor mean, option–stem word overlap, key position). `RidgeCV` picks the penalty by efficient LOO CV on the training items; the dev set is left for the shared recalibration. CPU only.
+
+All three produce a per-item `b_pred`, which `score_item_parameters` maps to Difficulty, recalibrates on dev, and scores exactly as for ICC models.
+
 ### 6.3 Prompts and option tokens
 
-`PromptBuilder` renders the Appendix A system and user prompts via the tokenizer's chat template, with three changes needed for token-probability training: the options are listed with keys (`A.`, `B.`, …); the "correct answer" field is shown as `Key. text`; and the assistant turn is pre-filled up to the answer slot (e.g. `**Student Answer:** `) so the next token is the option key. `enable_thinking=False` is passed for Qwen3. The stem is `ItemStem_Text` and each option is the `Answer__X` text. The `PIX` flag is not shown to the model.
+`PromptBuilder` renders the Appendix A system and user prompts via the tokenizer's chat template, with three changes needed for token-probability training: the options are listed with keys (`A.`, `B.`, …); the "correct answer" field is shown as `Key. text`; and the assistant turn is pre-filled up to the answer slot (e.g. `**Student Answer:** `) so the next token is the option key. `enable_thinking=False` is passed for Qwen3, and `pretrained_model.chat_template_kwargs` is forwarded to the template (Llama 3.1 injects "Today Date" into the system prompt, so its config pins `date_string`). The stem is `ItemStem_Text` and each option is the `Answer__X` text. The `PIX` flag is not shown to the model.
 
 `OptionTokenizer` maps option keys to token ids and **asserts each key is a single token** in the context it appears (with/without a leading space). `scripts/check_option_tokens.py` runs this check for a given tokenizer. Keys A–J must be supported (the data has up to 10 options).
 
@@ -487,7 +533,7 @@ Each step: forward → restricted softmax → `weighted_distribution_mse` → ba
 - **`system.py`:** `set_seed`, device/dtype selection, GPU memory reporting, git commit hash capture, run-directory creation (`results/<run.name>/<timestamp>/`).
 - **`cli.py`:** argument parsing (§9).
 - **`logging_utils.py`:** console + rotating file logs in `logs/`; optional TensorBoard/W&B.
-- **`metrics.py`:** Pearson r, RMSE, weighted MSE, computed on the original `Difficulty` scale.
+- **`metrics.py`:** Pearson r, RMSE, `bias` (mean predicted − true), `bootstrap_ci` and weighted MSE, computed on the original `Difficulty` scale. `bootstrap_ci(pred, ref, stat, n_boot, level, seed)` resamples (pred, ref) pairs, i.e. items, with replacement (vectorized; `stat` is `rmse` or `bias`) and returns percentile bounds. The same seed gives the same resampled indices for every statistic. Models are not retrained, so the interval reflects test-item sampling only.
 - **`results.py`:** writes `targets.parquet`, `predicted_icc.parquet`, `item_parameters.csv`, `metrics.json`, and a frozen copy of the resolved config.
 - **`reporting.py`:** per-item ICC plots overlaying target and LLM curves (paper Fig. 3); summary tables across folds/models.
 
@@ -506,6 +552,15 @@ python main.py --config config/default.yaml [options]
   --dry-run                parse + build targets + one forward pass, no training
 ```
 
+Sweeps are driven by two scripts that call `main.py` once per (model, seed) as subprocesses (so GPU memory is released between runs), with `--set run.seed=S --set run.name=<name>_seed<S>`:
+
+```
+python scripts/repeat_runs.py CONFIG [--seeds 1 2 3 4 5] [--aggregate-only]   # one model; mean/SD/min/max -> results/<name>_repeats.csv
+python scripts/run_all.py [--models ...] [--seeds ...] [--preflight|--aggregate-only|--force|--list]
+```
+
+`run_all.py` holds the model registry (Table 4 rows, config, expected GPU memory), skips finished (model, seed) pairs, continues past failures (`results/run_all_status.json`, non-zero exit) and writes `results/table4.{csv,md,tex}` plus `table4_runs.csv`. In the table, Pearson, RMSE and bias are mean (SD) over seeds; the RMSE CI is the mean of the per-seed bootstrap bounds; ELECTRA and the Li et al. ensemble are the published RMSEs. `--preflight` runs `--dry-run` per model and prints the measured post-load GPU memory.
+
 ### Pipeline (`llm_icc/app.py`)
 
 1. **Setup:** load and validate config; seed; create run directory; log environment and git hash.
@@ -513,24 +568,26 @@ python main.py --config config/default.yaml [options]
 3. **Build targets:** convert each item's `b` to NRM (eq. 4); compute θ_k, ω_k from `population`; materialize (N, n) targets per item; save to results.
 4. **Split:** build the predefined split or k-fold splits.
 5. **Per split:**
-   a. Build `LoRAResponseSimulator`.
+   a. Build the simulator selected by `pretrained_model.architecture` (`LoRAResponseSimulator` or `RobertaResponseSimulator`). For `run.method: regression|features` a separate runner (`run_regression_split`, `run_features_split`) fits a direct regressor on `b` instead and skips steps b–d.
    b. Stage 1 SFT (if enabled).
    c. Stage 2 distribution training with MSE and early stopping on dev.
    d. Predict discrete ICCs for dev and test items.
    e. Fit 1PL `b` from the predicted ICCs (eq. 11); fit `LinearRecalibrator` on dev; apply to test.
-   f. Compute metrics against the reference difficulty (gold for test).
+   f. Compute metrics against the reference difficulty (gold for test) in `score_item_parameters`: Pearson, RMSE, bias, 95% bootstrap CIs for RMSE, bias and the train-mean baseline RMSE (`report.bootstrap_n`, `report.ci_level`, seeded by `run.seed`).
 6. **Report:** aggregate across folds; plots and tables.
 
 ---
 
 ## 10. Dependencies
 
-`torch`, `transformers`, `peft`, `accelerate` (device placement only), `numpy`, `scipy`, `pandas`, `pyarrow`, `openpyxl`, `pyyaml`, `pydantic`, `matplotlib`, `tqdm`, `pytest`. Optional: `tensorboard`, `wandb`.
+`torch`, `transformers`, `peft`, `accelerate` (device placement only), `numpy`, `scipy`, `pandas`, `pyarrow`, `openpyxl`, `pyyaml`, `pydantic`, `matplotlib`, `tqdm`, `pytest`, `scikit-learn` and `textstat` (features baseline). Optional extras: `tracking` (`tensorboard`, `wandb`) and `quant` (`bitsandbytes`, for 4/8-bit loading).
 
 ---
 
 ## 11. Testing Strategy
 
 - **Unit:** θ_k/ω_k against numerical integration; eq. 4 round-trip (logistic → NRM → p_correct equals σ(a(θ−b))) for n = 4…10; `ICCFitter` recovers a known `b` from noiseless curves; loss masking with mixed option counts; descriptor validator rejects gaps/overlaps; option keys A–J are single tokens; `USMLEParser` handles variable option counts and the gold join.
+- **Baselines and metrics:** bias of a constant offset; bootstrap CI is degenerate for a constant error, brackets the point estimate, is reproducible for a seed, widens with the level, and is NaN for n < 2; the features model beats the mean on synthetic items with a known signal and handles empty stems; the regression baseline and RoBERTa simulator train on tiny random models and round-trip checkpoints; prompt kwargs are forwarded to the chat template.
+- **Known failing tests:** `test_descriptors.py` (3) and `test_training_loop.py::test_sft_dataset_samples_from_target` assume 20 descriptors; the default config now has 21 (`Rudimentary`).
 - **Integration:** `scripts/simulate_usmle.py` builds synthetic spreadsheets in the USMLE format with known `b`; a `--dry-run` and a tiny-model run (e.g. Qwen3-0.6B, few steps) execute end-to-end in CI.
 

@@ -1,0 +1,6 @@
+base: default.yaml
+run:
+  name: usmle_qwen3_14b_nf4
+pretrained_model:
+  name_or_path: Qwen/Qwen3-14B
+  quantization: 4bit           # same model as qwen3_14b, to isolate the effect of quantization

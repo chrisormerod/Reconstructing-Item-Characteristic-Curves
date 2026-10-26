@@ -51,7 +51,8 @@ class DataConfig(_Base):
 class PretrainedModelConfig(_Base):
     architecture: Literal["causal_lm", "roberta_mc"] = "causal_lm"  # causal_lm = LoRA LLM; roberta_mc = RoBERTa
     name_or_path: str = "Qwen/Qwen3-4B"
-    dtype: Literal["bfloat16", "float16"] = "bfloat16"
+    dtype: Literal["bfloat16", "float16"] = "bfloat16"   # compute dtype when quantized
+    quantization: Literal["none", "8bit", "4bit"] = "none"  # bitsandbytes (QLoRA: frozen base quantized, LoRA in 16-bit)
     max_length: int = 2048
     gradient_checkpointing: bool = True
     enable_thinking: bool = False

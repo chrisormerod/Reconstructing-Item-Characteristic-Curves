@@ -14,6 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 tracking = ["tensorboard", "wandb"]
+quant = ["bitsandbytes"]   # pretrained_model.quantization: 4bit | 8bit (Linux/CUDA)
 
 [tool.setuptools.packages.find]
 include = ["llm_icc*"]
