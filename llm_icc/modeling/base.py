@@ -10,10 +10,20 @@ from torch import Tensor, nn
 
 from llm_icc.data.descriptors import DescriptorScale
 from llm_icc.data.item import Item
+from llm_icc.data.torch_datasets import DistributionExample, distribution_collate, sft_collate
 
 
 class ResponseSimulator(ABC):
     """Wraps a pretrained LM; exposes option-level probabilities, not text."""
+
+    # Example construction and batching are model-specific; the defaults are the causal-LM ones.
+    distribution_collate = staticmethod(distribution_collate)
+    sft_collate = staticmethod(sft_collate)
+
+    def build_examples(self, items: list[Item], scale: DescriptorScale, mu: float, sigma: float,
+                       with_target: bool = True) -> list[DistributionExample]:
+        """One example per (item, descriptor) pair."""
+        raise NotImplementedError
 
     @abstractmethod
     def answer_logits(self, batch: dict[str, Tensor]) -> Tensor:

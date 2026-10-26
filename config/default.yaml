@@ -57,6 +57,8 @@ calibration:
 
 report:
   n_icc_plots: 12              # test-item ICC plots per split
+  bootstrap_n: 10000           # percentile-bootstrap resamples over items for RMSE / bias CIs (no retraining)
+  ci_level: 0.95
 
 descriptors:                   # ordered: lowest -> highest; [lower, upper]
   Critical:          [-.inf, -3.0]
@@ -64,7 +66,8 @@ descriptors:                   # ordered: lowest -> highest; [lower, upper]
   Deficient:         [-2.7, -2.4]
   Inadequate:        [-2.4, -2.1]
   Minimal:           [-2.1, -1.8]
-  Emerging:          [-1.8, -1.2]   # paper lists (-1.5, -1.2), leaving a gap; closed by extending down
+  Rudimentary:       [-1.8, -1.5]   # paper leaves (-1.8, -1.5) unlabeled; bridged with this label
+  Emerging:          [-1.5, -1.2]
   Developing:        [-1.2, -0.9]
   Approaching Basic: [-0.9, -0.6]
   Basic:             [-0.6, -0.3]

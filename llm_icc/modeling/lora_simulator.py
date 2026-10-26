@@ -30,7 +30,8 @@ class LoRAResponseSimulator(ResponseSimulator):
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.pad_id = self.tokenizer.pad_token_id
         self.option_tokenizer = OptionTokenizer(self.tokenizer)
-        self.prompt_builder = PromptBuilder(self.tokenizer, enable_thinking=pm.enable_thinking)
+        self.prompt_builder = PromptBuilder(self.tokenizer, enable_thinking=pm.enable_thinking,
+                                            chat_template_kwargs=pm.chat_template_kwargs)
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         dtype = _DTYPES[pm.dtype] if device == "cuda" else torch.float32
@@ -66,6 +67,10 @@ class LoRAResponseSimulator(ResponseSimulator):
         b = self._to_device(batch)
         gathered = logits.gather(1, b["option_token_ids"]).float()
         return gathered.masked_fill(~b["option_mask"], float("-inf"))
+
+    def build_examples(self, items, scale, mu, sigma, with_target=True):
+        return build_examples(items, scale, mu, sigma, self.prompt_builder, self.option_tokenizer,
+                              self.config.pretrained_model.max_length, with_target=with_target)
 
     def item_batches(self, item: Item, scale: DescriptorScale) -> Iterable[dict[str, Tensor]]:
         # no targets are needed for prediction

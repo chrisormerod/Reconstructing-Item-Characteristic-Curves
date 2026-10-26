@@ -1,0 +1,21 @@
+# Regression baseline: ModernBERT-large + one-output head, MSE on the item parameter b. No ICCs are produced;
+# the `lora`, `roberta`, `descriptors`-based training and SFT settings are unused.
+base: default.yaml
+run:
+  name: usmle_modernbert_regression
+  method: regression
+pretrained_model:
+  name_or_path: answerdotai/ModernBERT-large
+  gradient_checkpointing: false
+  predict_batch_size: 16
+regression:
+  max_length: 1024
+  include_correct_answer: true
+training:
+  epochs: 10
+  learning_rate: 2.0e-5
+  batch_size: 8
+  gradient_accumulation_steps: 1
+  weight_decay: 0.01
+  eval_every_steps: 10
+  early_stopping_patience: 5

@@ -22,6 +22,10 @@ def main():
             row[c] = df[c].mean()
             if len(tests) > 1:
                 row[c + "_sd"] = df[c].std()
+        if len(tests) == 1 and "rmse_ci" in df:  # CIs are per held-out set; not averaged across folds
+            row["bias"] = df["bias"].iloc[0]
+            row["rmse_ci"] = "[{:.3f}, {:.3f}]".format(*df["rmse_ci"].iloc[0])
+            row["bias_ci"] = "[{:.3f}, {:.3f}]".format(*df["bias_ci"].iloc[0])
         rows.append(row)
     if not rows:
         print(f"no metrics.json found under {root}")

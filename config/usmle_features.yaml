@@ -1,0 +1,10 @@
+# Features baseline: TF-IDF + textstat readability/length features -> ridge on b. CPU only; the model, lora,
+# roberta and training settings are unused.
+base: default.yaml
+run:
+  name: usmle_features
+  method: features
+features:
+  tfidf_max_features: 5000
+  ngram_max: 2
+  include_correct_answer: true

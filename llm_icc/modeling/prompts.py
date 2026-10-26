@@ -26,9 +26,10 @@ class PromptBuilder:
     """Renders prompts via the tokenizer's chat template (Appendix A structure, adapted so the
     answer slot is a single option-key token)."""
 
-    def __init__(self, tokenizer, enable_thinking: bool = False):
+    def __init__(self, tokenizer, enable_thinking: bool = False, chat_template_kwargs: dict | None = None):
         self.tokenizer = tokenizer
         self.enable_thinking = enable_thinking
+        self.chat_template_kwargs = dict(chat_template_kwargs or {})
 
     @staticmethod
     def user_message(item: Item, level: str) -> str:
@@ -41,7 +42,8 @@ class PromptBuilder:
         messages = [{"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": self.user_message(item, level)}]
         text = self.tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True, enable_thinking=self.enable_thinking)
+            messages, tokenize=False, add_generation_prompt=True, enable_thinking=self.enable_thinking,
+            **self.chat_template_kwargs)
         return text + ANSWER_PREFILL
 
     def build_ids(self, item: Item, level: str) -> list[int]:

@@ -9,12 +9,14 @@ Any key can be overridden with `--set a.b.c=value` (value parsed as YAML).
 |---------|------|
 | `run` | `name`, `seed`, `results_dir`, `logs_dir`, `tensorboard`, `wandb` (both default false) |
 | `data` | `usmle_dir`; `splits.{strategy: predefined\|kfold, k, dev_fraction}`; `exclude_pix`; `difficulty_transform.{method: standardize\|linear, shift, scale}` |
-| `pretrained_model` | `name_or_path`, `dtype`, `max_length`, `gradient_checkpointing`, `enable_thinking`, `attn_implementation`, `predict_batch_size` |
+| `pretrained_model` | `architecture` (`causal_lm` \| `roberta_mc`), `name_or_path`, `dtype`, `max_length`, `gradient_checkpointing`, `enable_thinking`, `chat_template_kwargs` (extra chat-template variables, e.g. Llama 3.1 `date_string`), `attn_implementation`, `predict_batch_size` |
+| `roberta` | `ablation_samples`, `protect_special_tokens` (only for `roberta_mc`) |
+| `features` | `tfidf_max_features`, `ngram_max`, `tfidf_min_df`, `numeric_weight`, `alpha_log10_min/max`, `include_correct_answer` (only for `run.method: features`) |
 | `lora` | `r`, `alpha`, `dropout`, `target_modules`, `bias` |
 | `training` | `epochs`, `learning_rate`, `batch_size`, `gradient_accumulation_steps`, `weight_decay`, `warmup_ratio`, `max_grad_norm`, `eval_every_steps` (optimizer steps), `early_stopping_patience`, `sft.{enabled, epochs, learning_rate}` |
 | `population` | `mu`, `sigma` |
 | `calibration` | `icc_models` (first entry drives the metrics), `linear_recalibration` |
-| `report` | `n_icc_plots` |
+| `report` | `n_icc_plots`, `bootstrap_n` (percentile-bootstrap resamples over items for the RMSE/bias CIs), `ci_level` |
 | `descriptors` | ordered mapping `label: [lower, upper]`; contiguous, first lower `-.inf`, last upper `.inf` |
 
 `linear` difficulty transform: `b = scale·(Difficulty − shift)`. `standardize`: `shift`/`scale` are replaced

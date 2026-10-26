@@ -13,9 +13,10 @@ class StubTokenizer:
             return [ord(text.strip())]
         return [ord(c) for c in text]
 
-    def apply_chat_template(self, messages, tokenize, add_generation_prompt, enable_thinking):
+    def apply_chat_template(self, messages, tokenize, add_generation_prompt, enable_thinking, **kwargs):
         assert tokenize is False and add_generation_prompt and enable_thinking is False
-        return "".join(f"<{m['role']}>{m['content']}</>" for m in messages) + "<assistant>"
+        head = f"[{kwargs['date_string']}]" if "date_string" in kwargs else ""
+        return head + "".join(f"<{m['role']}>{m['content']}</>" for m in messages) + "<assistant>"
 
 
 def _item():
@@ -29,6 +30,11 @@ def test_prompt_lists_keys_correct_answer_and_prefill():
     assert "**Correct Answer:** B. text B" in text
     assert text.endswith("<assistant>" + ANSWER_PREFILL)
     assert "PIX" not in text
+
+
+def test_chat_template_kwargs_are_forwarded():
+    text = PromptBuilder(StubTokenizer(), chat_template_kwargs={"date_string": "01 Jan 2025"}).build_text(_item(), "Basic")
+    assert text.startswith("[01 Jan 2025]")
 
 
 def test_option_tokenizer_maps_all_keys_to_distinct_ids():

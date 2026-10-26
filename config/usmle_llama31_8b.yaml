@@ -1,0 +1,7 @@
+base: default.yaml
+run:
+  name: usmle_llama31_8b
+pretrained_model:
+  name_or_path: meta-llama/Llama-3.1-8B-Instruct
+  chat_template_kwargs:
+    date_string: 01 Jan 2025   # Llama 3.1's template injects "Today Date" into the system prompt; pin it so train/predict prompts match

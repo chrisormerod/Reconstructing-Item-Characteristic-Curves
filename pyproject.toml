@@ -9,7 +9,7 @@ description = "LLM-simulated item characteristic curves (arXiv:2601.02580) on th
 requires-python = ">=3.10"
 dependencies = [
   "torch", "transformers", "peft", "accelerate", "numpy", "scipy", "pandas",
-  "pyarrow", "openpyxl", "pyyaml", "pydantic>=2", "matplotlib", "tqdm", "pytest",
+  "pyarrow", "openpyxl", "scikit-learn", "textstat", "pyyaml", "pydantic>=2", "matplotlib", "tqdm", "pytest",
 ]
 
 [project.optional-dependencies]

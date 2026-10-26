@@ -8,7 +8,8 @@
 5. 5-fold CV over the training file (same test set in every fold):
    `python main.py --config config/usmle_qwen3_4b.yaml --set data.splits.strategy=kfold`
    (one fold: add `--fold 2`).
-6. Larger model: `config/usmle_qwen3_8b.yaml` (needs more GPU memory; lower `max_length` if needed).
+6. Llama-3.1-8B-Instruct (gated; accept the licence and `huggingface-cli login`): run `python scripts/check_option_tokens.py meta-llama/Llama-3.1-8B-Instruct`, then `config/usmle_llama31_8b.yaml`.
+7. Larger model: `config/usmle_qwen3_8b.yaml` (needs more GPU memory; lower `max_length` if needed).
 7. Compare runs: `python scripts/summarize_runs.py results/`.
 
 Things to vary: `data.exclude_pix`, `training.sft.enabled`, `lora.r`, `data.difficulty_transform`,

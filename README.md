@@ -95,3 +95,13 @@ experiments.
 Unit tests pass. The pipeline (SFT → distribution training → prediction → evaluation, `--resume`,
 `--dry-run`) was run end to end on synthetic data with Qwen3-0.6B. **It has not been run on the real USMLE data
 with the 4B/8B models**, so no accuracy numbers are claimed here.
+
+## RoBERTa variant
+
+`config/usmle_roberta_large.yaml` swaps the LoRA LLM for `FacebookAI/roberta-large` as a multiple-choice model,
+following Maeda (2023, arXiv:2310.11655): ability is simulated by zeroing the word embeddings of a random share of
+the vocabulary. Descriptor k keeps a fraction Phi(theta_k) of the words; the ICC is the option distribution averaged
+over `roberta.ablation_samples` ablations. The encoder and head are fully fine-tuned with the same SFT and
+distribution stages. Code: `llm_icc/modeling/roberta_simulator.py`.
+
+    python main.py --config config/usmle_roberta_large.yaml

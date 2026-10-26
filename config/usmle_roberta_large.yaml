@@ -1,0 +1,19 @@
+# RoBERTa-large multiple-choice simulator (Maeda 2023, arXiv:2310.11655): ability = share of the vocabulary
+# whose word embeddings are kept. Full fine-tuning; the `lora` section is unused.
+base: default.yaml
+run:
+  name: usmle_roberta_large
+pretrained_model:
+  architecture: roberta_mc
+  name_or_path: FacebookAI/roberta-large
+  max_length: 512              # RoBERTa's position limit; longer stems are truncated from the left
+  predict_batch_size: 21       # one forward pass covers all descriptors
+roberta:
+  ablation_samples: 10
+  protect_special_tokens: true
+training:
+  batch_size: 2                # items are sequences x options, so keep this small
+  gradient_accumulation_steps: 8
+  learning_rate: 1.0e-5
+  sft:
+    learning_rate: 1.0e-5

@@ -7,10 +7,10 @@ from functools import partial
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 
-from llm_icc.data.torch_datasets import distribution_collate, sft_collate
 from llm_icc.modeling.early_stopping import EarlyStopping
 from llm_icc.modeling.losses import sft_cross_entropy, weighted_distribution_mse
 
@@ -114,7 +114,7 @@ class SFTTrainer(_BaseTrainer):
         return sft_cross_entropy(self.sim.answer_logits(batch), batch["labels"].to(self.sim.device))
 
     def train(self) -> TrainingResult:
-        steps = self._run(sft_collate)
+        steps = self._run(self.sim.sft_collate)
         return TrainingResult(steps=steps)
 
 
@@ -140,7 +140,7 @@ class DistributionTrainer(_BaseTrainer):
         self.sim.eval_mode()
         d = self.sim.device
         num, den = 0.0, 0.0
-        for batch in self._loader(ds, distribution_collate, shuffle=False):
+        for batch in self._loader(ds, self.sim.distribution_collate, shuffle=False):
             probs = self.sim.option_probabilities(batch)
             w = batch["weight"].to(d).float()
             sq = ((probs.float() - batch["target"].to(d)) ** 2) * batch["option_mask"].to(d).float()
@@ -173,7 +173,7 @@ class DistributionTrainer(_BaseTrainer):
         result.history.append({"step": 0, **base})
         self.log.info("step 0 dev_loss %.5f", base["dev_loss"])
 
-        result.steps = self._run(distribution_collate, on_step)
+        result.steps = self._run(self.sim.distribution_collate, on_step)
         if result.steps % t.eval_every_steps != 0:
             check(result.steps)
         if stopper.best_state is not None:
@@ -181,3 +181,20 @@ class DistributionTrainer(_BaseTrainer):
         result.best_dev_loss, result.best_step = stopper.best, stopper.best_step
         self.log.info("best dev_loss %.5f at step %d", stopper.best, stopper.best_step)
         return result
+
+
+class RegressionTrainer(DistributionTrainer):
+    """Regression baseline: MSE between the predicted and target item parameter, early-stopped on dev MSE."""
+
+    def _loss(self, batch):
+        return F.mse_loss(self.sim.forward(batch), batch["target"].to(self.sim.device))
+
+    @torch.no_grad()
+    def evaluate(self, ds) -> dict[str, float]:
+        self.sim.eval_mode()
+        sq, n = 0.0, 0
+        for batch in self._loader(ds, self.sim.distribution_collate, shuffle=False):
+            sq += float(((self.sim.forward(batch) - batch["target"].to(self.sim.device)) ** 2).sum())
+            n += len(batch["target"])
+        self.sim.train_mode()
+        return {"dev_loss": sq / n}

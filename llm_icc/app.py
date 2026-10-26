@@ -70,7 +70,12 @@ def evaluate_split(preds: dict[str, np.ndarray], bank: ItemBank, split: Split, c
                 row[f"b_{m}"], row[f"a_{m}"] = fit.b, fit.a
             row["b_pred"] = row[f"b_{primary}"]
             rows.append(row)
-    df = pd.DataFrame(rows)
+    return score_item_parameters(pd.DataFrame(rows), bank, split, config, transform, primary)
+
+
+def score_item_parameters(df: pd.DataFrame, bank: ItemBank, split: Split, config: Config,
+                          transform: DifficultyTransform, primary: str) -> tuple[dict, pd.DataFrame]:
+    """From per-item `b_pred` (roles dev/test): map to Difficulty, recalibrate on dev, score dev and test."""
     df["difficulty_uncalibrated"] = transform.to_difficulty(df["b_pred"].to_numpy())
 
     out: dict = {"primary_icc_model": primary, "split": split.name}
@@ -87,24 +92,42 @@ def evaluate_split(preds: dict[str, np.ndarray], bank: ItemBank, split: Split, c
     for role in ("dev", "test"):
         d = df[df["role"] == role]
         ref = d["reference_difficulty"]
+        ci = lambda pred, stat: list(M.bootstrap_ci(  # noqa: E731
+            pred, ref, stat, config.report.bootstrap_n, config.report.ci_level, config.run.seed))
+        baseline = np.full(len(d), train_mean)
         out[role] = {
             "n_items": int(len(d)),
             "pearson": M.pearson(d["difficulty_pred"], ref),
             "rmse": M.rmse(d["difficulty_pred"], ref),
             "rmse_uncalibrated": M.rmse(d["difficulty_uncalibrated"], ref),
-            "rmse_train_mean_baseline": M.rmse(np.full(len(d), train_mean), ref),
-            "icc_mse": float(d["icc_mse"].mean()),
+            "rmse_train_mean_baseline": M.rmse(baseline, ref),
+            "rmse_ci": ci(d["difficulty_pred"], "rmse"),
+            "rmse_train_mean_baseline_ci": ci(baseline, "rmse"),
+            "bias": M.bias(d["difficulty_pred"], ref),
+            "bias_ci": ci(d["difficulty_pred"], "bias"),
+            "ci_level": config.report.ci_level,
+            "ci_method": f"percentile bootstrap over items, n={config.report.bootstrap_n}",
         }
+        if "icc_mse" in d:
+            out[role]["icc_mse"] = float(d["icc_mse"].mean())
     if config.calibration.linear_recalibration:
         out["dev"]["note"] = "dev metrics are in-sample for the recalibration line"
     return out, df
 
 
 # --------------------------------------------------------------------------- per split
+def make_simulator(config: Config, resume: str | None = None):
+    """Build (or reload from `resume`) the simulator selected by `pretrained_model.architecture`."""
+    if config.pretrained_model.architecture == "roberta_mc":
+        from llm_icc.modeling.roberta_simulator import RobertaResponseSimulator as Sim
+    else:
+        from llm_icc.modeling.lora_simulator import LoRAResponseSimulator as Sim
+    return Sim.load(Path(resume), config) if resume else Sim(config)
+
+
 def run_split(split: Split, bank: ItemBank, config: Config, transform: DifficultyTransform, stage_idx: int,
               args, run_dir: Path, tracker) -> dict | None:
-    from llm_icc.data.torch_datasets import DistributionDataset, SFTDataset, build_examples
-    from llm_icc.modeling.lora_simulator import LoRAResponseSimulator
+    from llm_icc.data.torch_datasets import DistributionDataset, SFTDataset
     from llm_icc.modeling.training_loop import DistributionTrainer, SFTTrainer
 
     sdir = run_dir / split.name
@@ -114,10 +137,7 @@ def run_split(split: Split, bank: ItemBank, config: Config, transform: Difficult
     theta_k, omega_k = scale.conditional_means(mu, sigma), scale.weights(mu, sigma)
     log.info("== split %s: train=%d dev=%d test=%d", split.name, len(split.train), len(split.dev), len(split.test))
 
-    if args.resume:
-        sim = LoRAResponseSimulator.load(Path(args.resume), config)
-    else:
-        sim = LoRAResponseSimulator(config)
+    sim = make_simulator(config, args.resume)
     log.info("model loaded; %s", system.gpu_memory_report())
 
     if args.dry_run:
@@ -128,9 +148,7 @@ def run_split(split: Split, bank: ItemBank, config: Config, transform: Difficult
         return None
 
     resumed_predict = bool(args.resume) and stage_idx >= STAGES.index("predict")
-    max_len = config.pretrained_model.max_length
-    mk = lambda ids: build_examples([bank[i] for i in ids], scale, mu, sigma, sim.prompt_builder,  # noqa: E731
-                                    sim.option_tokenizer, max_len)
+    mk = lambda ids: sim.build_examples([bank[i] for i in ids], scale, mu, sigma)  # noqa: E731
     if not resumed_predict:
         train_ex = mk(split.train)
         if config.training.sft.enabled and not args.resume:
@@ -179,6 +197,87 @@ def run_split(split: Split, bank: ItemBank, config: Config, transform: Difficult
     return metrics
 
 
+def run_regression_split(split: Split, bank: ItemBank, config: Config, transform: DifficultyTransform,
+                         stage_idx: int, args, run_dir: Path, tracker) -> dict | None:
+    """Baseline: fine-tune a one-output regression head on b with MSE, then score like the ICC pipeline."""
+    from llm_icc.modeling.regression_baseline import RegressionDataset, RegressionModel
+    from llm_icc.modeling.training_loop import RegressionTrainer
+
+    sdir = run_dir / split.name
+    sdir.mkdir(parents=True, exist_ok=True)
+    log.info("== split %s (regression): train=%d dev=%d test=%d", split.name, len(split.train), len(split.dev),
+             len(split.test))
+    model = RegressionModel.load(Path(args.resume), config) if args.resume else RegressionModel(config)
+    log.info("model loaded; %s", system.gpu_memory_report())
+    items = lambda ids: [bank[i] for i in ids]  # noqa: E731
+
+    if args.dry_run:
+        b = model.predict_b(items(split.train[:2]))
+        log.info("dry run OK: predicted b for 2 items: %s", np.round(b, 4))
+        return None
+    if not args.resume and stage_idx >= STAGES.index("train"):
+        log.info("training regression head (MSE)")
+        res = RegressionTrainer(model, RegressionDataset(model.build_examples(items(split.train))),
+                                RegressionDataset(model.build_examples(items(split.dev))), config, log,
+                                checkpoint_dir=sdir / "model_best", seed=config.run.seed, tracker=tracker).train()
+        results.write_json({"best_dev_loss": res.best_dev_loss, "best_step": res.best_step,
+                            "steps": res.steps, "history": res.history}, sdir / "training.json")
+        model.save(sdir / "model")
+    if stage_idx < STAGES.index("predict"):
+        return None
+
+    rows = []
+    for role, ids in (("dev", split.dev), ("test", split.test)):
+        for iid, b in zip(ids, model.predict_b(items(ids))):
+            item = bank[iid]
+            rows.append({"item_id": iid, "role": role, "reference_difficulty": item.reference_difficulty,
+                         "target_b": float(transform.to_b(item.reference_difficulty)), "b_pred": float(b)})
+    if stage_idx < STAGES.index("evaluate"):
+        return None
+    metrics, params_df = score_item_parameters(pd.DataFrame(rows), bank, split, config, transform, "regression")
+    results.write_csv(params_df, sdir / "item_parameters.csv")
+    results.write_json(metrics, sdir / "metrics.json")
+    t = params_df[params_df["role"] == "test"]
+    reporting.plot_scatter(t["difficulty_pred"], t["reference_difficulty"], sdir / "scatter_test.png",
+                           f"{split.name} test (r={metrics['test']['pearson']:.3f})")
+    log.info("%s test: r=%.3f rmse=%.3f (baseline %.3f)", split.name, metrics["test"]["pearson"],
+             metrics["test"]["rmse"], metrics["test"]["rmse_train_mean_baseline"])
+    return metrics
+
+
+def run_features_split(split: Split, bank: ItemBank, config: Config, transform: DifficultyTransform,
+                       stage_idx: int, args, run_dir: Path, tracker) -> dict | None:
+    """Baseline: TF-IDF + textstat features -> ridge on b, then score like the ICC pipeline. Fits in seconds on a CPU."""
+    from llm_icc.modeling.features_baseline import FeaturesModel
+
+    sdir = run_dir / split.name
+    sdir.mkdir(parents=True, exist_ok=True)
+    log.info("== split %s (features): train=%d dev=%d test=%d", split.name, len(split.train), len(split.dev),
+             len(split.test))
+    if args.dry_run or stage_idx < STAGES.index("predict"):
+        return None
+    items = lambda ids: [bank[i] for i in ids]  # noqa: E731
+    model = FeaturesModel(config).fit(items(split.train))
+    log.info("ridge alpha=%.3g, %d features", model.ridge.alpha_, model.ridge.coef_.size)
+    rows = []
+    for role, ids in (("dev", split.dev), ("test", split.test)):
+        for iid, b in zip(ids, model.predict_b(items(ids))):
+            item = bank[iid]
+            rows.append({"item_id": iid, "role": role, "reference_difficulty": item.reference_difficulty,
+                         "target_b": float(transform.to_b(item.reference_difficulty)), "b_pred": float(b)})
+    if stage_idx < STAGES.index("evaluate"):
+        return None
+    metrics, params_df = score_item_parameters(pd.DataFrame(rows), bank, split, config, transform, "features")
+    results.write_csv(params_df, sdir / "item_parameters.csv")
+    results.write_json(metrics, sdir / "metrics.json")
+    t = params_df[params_df["role"] == "test"]
+    reporting.plot_scatter(t["difficulty_pred"], t["reference_difficulty"], sdir / "scatter_test.png",
+                           f"{split.name} test (r={metrics['test']['pearson']:.3f})")
+    log.info("%s test: r=%.3f rmse=%.3f (baseline %.3f)", split.name, metrics["test"]["pearson"],
+             metrics["test"]["rmse"], metrics["test"]["rmse_train_mean_baseline"])
+    return metrics
+
+
 # --------------------------------------------------------------------------- entry
 def run(config: Config, args) -> Path:
     stage_idx = len(STAGES) - 2 if args.stage == "all" else STAGES.index(args.stage)  # all == evaluate
@@ -211,7 +310,8 @@ def run(config: Config, args) -> Path:
 
     all_metrics = {}
     for split in splits:
-        m = run_split(split, bank, config, transform, stage_idx, args, run_dir, tracker)
+        runner = {"regression": run_regression_split, "features": run_features_split}.get(config.run.method, run_split)
+        m = runner(split, bank, config, transform, stage_idx, args, run_dir, tracker)
         if args.dry_run:
             break
         if m is not None:
