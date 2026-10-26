@@ -450,7 +450,7 @@ class ResponseSimulator(ABC):
 
 ### 6.2 `LoRAResponseSimulator`
 
-Wraps `AutoModelForCausalLM` + `peft.LoraConfig`/`get_peft_model`. Responsibilities: load base model in configured dtype; attach adapters to `target_modules`; run a forward pass and take logits at the last non-pad position of each prompt; gather logits at the option token ids; expose `option_probabilities`, `predict_icc`, and adapter save/load. Only adapter weights are saved.
+Wraps `AutoModelForCausalLM` + `peft.LoraConfig`/`get_peft_model`. Responsibilities: load base model in configured dtype; attach adapters to `target_modules`; run a forward pass and take logits at the last non-pad position of each prompt; gather logits at the option token ids; expose `option_probabilities`, `predict_icc`, and adapter save/load. Only adapter weights are saved. Batches are left-padded so the answer slot is always the last position, which lets the LM head run on that one position only (`logits_to_keep=1`).
 
 With `pretrained_model.quantization: 4bit|8bit` the base model is loaded through bitsandbytes (`BitsAndBytesConfig`: NF4 with double quantization and `dtype` as compute type for 4-bit) with `device_map={"": 0}`, prepared with `prepare_model_for_kbit_training` (fp32 norms/embeddings, input grads, gradient checkpointing) and not moved with `.to(device)`; LoRA adapters stay 16/32-bit (QLoRA). This is what makes Qwen3-32B trainable on one 48 GB GPU (~61 GiB in bf16, ~24 GiB in NF4). It needs CUDA and the `quant` extra.
 
@@ -464,7 +464,7 @@ All three produce a per-item `b_pred`, which `score_item_parameters` maps to Dif
 
 ### 6.3 Prompts and option tokens
 
-`PromptBuilder` renders the Appendix A system and user prompts via the tokenizer's chat template, with three changes needed for token-probability training: the options are listed with keys (`A.`, `B.`, …); the "correct answer" field is shown as `Key. text`; and the assistant turn is pre-filled up to the answer slot (e.g. `**Student Answer:** `) so the next token is the option key. `enable_thinking=False` is passed for Qwen3, and `pretrained_model.chat_template_kwargs` is forwarded to the template (Llama 3.1 injects "Today Date" into the system prompt, so its config pins `date_string`). The stem is `ItemStem_Text` and each option is the `Answer__X` text. The `PIX` flag is not shown to the model.
+`PromptBuilder` renders the Appendix A system and user prompts via the tokenizer's chat template, with three changes needed for token-probability training: the options are listed with keys (`A.`, `B.`, …); the "correct answer" field is shown as `Key. text`; and the assistant turn is pre-filled up to the answer slot (e.g. `**Student Answer:** `) so the next token is the option key. `enable_thinking=False` is passed for Qwen3, and `pretrained_model.chat_template_kwargs` is forwarded to the template (Llama 3.1 injects "Today Date" into the system prompt, so its config pins `date_string`). The stem is `ItemStem_Text` and each option is the `Answer__X` text. The `PIX` flag is not shown to the model. The Appendix A text was not available, so the prompts in `prompts.py` follow the described structure but are not verbatim.
 
 `OptionTokenizer` maps option keys to token ids and **asserts each key is a single token** in the context it appears (with/without a leading space). `scripts/check_option_tokens.py` runs this check for a given tokenizer. Keys A–J must be supported (the data has up to 10 options).
 
