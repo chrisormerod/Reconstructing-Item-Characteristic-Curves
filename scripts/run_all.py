@@ -6,6 +6,7 @@ Usage:
   python scripts/run_all.py --models qwen3_14b qwen3_32b --seeds 1 2
   python scripts/run_all.py --aggregate-only       # rebuild results/table4.{csv,md,tex} from existing runs
   python scripts/run_all.py --list
+  python scripts/run_all.py --set data.dir=/path/to/usmle      # --set is passed to every main.py run
 
 A (model, seed) run is finished when results/<name>_seed<S>/*/metrics.json exists, so an interrupted job resumes
 where it stopped (a half-trained run restarts from scratch). A failure is recorded and the sweep continues;
@@ -66,7 +67,11 @@ def stream(cmd: list[str], log: Path | None = None) -> int:
     return p.returncode
 
 
-def preflight(keys: list[str], results: Path) -> int:
+def set_args(overrides: list[str]) -> list[str]:
+    return [x for o in overrides for x in ("--set", o)]
+
+
+def preflight(keys: list[str], results: Path, overrides: list[str]) -> int:
     """Load each model and run one forward pass (main.py --dry-run); print the measured post-load GPU memory."""
     bad = 0
     for k in keys:
@@ -74,14 +79,15 @@ def preflight(keys: list[str], results: Path) -> int:
         print(f"\n== preflight {k}: {label} (expected peak ~{est} GiB)", flush=True)
         tmp = results / "_preflight.log"
         tmp.unlink(missing_ok=True)
-        rc = stream([sys.executable, "main.py", "--config", cfg, "--dry-run", "--set", "run.name=_preflight"], tmp)
+        rc = stream([sys.executable, "main.py", "--config", cfg, "--dry-run", "--set", "run.name=_preflight",
+                         *set_args(overrides)], tmp)
         mem = re.findall(r"model loaded; (.*)", tmp.read_text()) if tmp.exists() else []
         print(f"-> {'OK' if rc == 0 else 'FAILED'} {mem[-1] if mem else ''}")
         bad += rc != 0
     return bad
 
 
-def run_sweep(keys: list[str], seeds: list[int], results: Path, force: bool) -> list[tuple[str, int, str]]:
+def run_sweep(keys: list[str], seeds: list[int], results: Path, force: bool, overrides: list[str]) -> list[tuple[str, int, str]]:
     status, failures = [], []
     for k in keys:
         for s in seeds:
@@ -92,7 +98,7 @@ def run_sweep(keys: list[str], seeds: list[int], results: Path, force: bool) -> 
             print(f"\n==> {k} seed {s}", flush=True)
             t0 = time.time()
             rc = stream([sys.executable, "main.py", "--config", ALL[k][2], "--set", f"run.seed={s}",
-                         "--set", f"run.name={name}"])
+                         "--set", f"run.name={name}", *set_args(overrides)])
             mins = (time.time() - t0) / 60
             status.append({"model": k, "seed": s, "ok": rc == 0, "minutes": round(mins, 1)})
             print(f"<== {k} seed {s}: {'ok' if rc == 0 else f'FAILED (exit {rc})'} in {mins:.1f} min", flush=True)
@@ -176,6 +182,8 @@ def main():
     p.add_argument("--aggregate-only", action="store_true")
     p.add_argument("--force", action="store_true", help="rerun finished (model, seed) pairs")
     p.add_argument("--list", action="store_true")
+    p.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE",
+                   help="config override passed to every main.py run (repeatable), e.g. --set data.dir=/data/usmle")
     a = p.parse_args()
 
     if a.list:
@@ -183,8 +191,8 @@ def main():
             print(f"{k:14} {label:36} {cfg:45} {'GPU ~%d GiB' % est if gpu else 'CPU'}{'' if k in MODELS else '  (extra)'}")
         return
     if a.preflight:
-        sys.exit(1 if preflight(a.models, a.results) else 0)
-    failures = [] if a.aggregate_only else run_sweep(a.models, a.seeds, a.results, a.force)
+        sys.exit(1 if preflight(a.models, a.results, a.overrides) else 0)
+    failures = [] if a.aggregate_only else run_sweep(a.models, a.seeds, a.results, a.force, a.overrides)
     runs = collect(a.models, a.seeds, a.results)
     if runs.empty:
         raise SystemExit("no finished runs to summarize")

@@ -62,6 +62,7 @@ python scripts/repeat_runs.py config/usmle_qwen3_8b.yaml   # one model, seeds 1-
 python scripts/run_all.py --preflight                      # load every model once, print GPU memory
 python scripts/run_all.py                                  # all models x 5 seeds -> results/table4.{csv,md,tex}
 python scripts/run_all.py --models qwen3_14b --seeds 1 2   # subset; --list, --aggregate-only, --force also exist
+python scripts/run_all.py --set data.dir=/path/to/usmle    # any config override, passed to every run
 ```
 
 The sweep skips finished (model, seed) runs, so it resumes after an interruption, and it continues past failures
