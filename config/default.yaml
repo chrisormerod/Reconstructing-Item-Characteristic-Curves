@@ -39,14 +39,14 @@ pretrained_model:
   predict_batch_size: 10       # descriptors per forward pass at prediction time
 
 lora:
-  r: 32
-  alpha: 64
-  dropout: 0.05
+  r: 64
+  alpha: 128
+  dropout: 0.0
   target_modules: [q_proj, k_proj, v_proj]
   bias: none
 
 training:
-  epochs: 3                    # maximum stage-2 epochs; early stopping may end sooner
+  epochs: 10                   # maximum stage-2 epochs; early stopping may end sooner
   learning_rate: 5.0e-6        # stage 2 (distribution correction)
   batch_size: 1
   gradient_accumulation_steps: 8
