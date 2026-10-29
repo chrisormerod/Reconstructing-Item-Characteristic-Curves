@@ -4,3 +4,4 @@ run:
 pretrained_model:
   name_or_path: Qwen/Qwen3-32B
   quantization: 4bit           # 32.8B params = ~61 GiB in bf16; does not fit a 48 GB L40S unquantized
+  max_length: 1024             # longest USMLE prompt is 921 tokens (train+test); longer prompts raise

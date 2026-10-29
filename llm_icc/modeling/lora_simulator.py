@@ -28,7 +28,7 @@ def _bnb_config(mode: str, compute_dtype):
 
 class LoRAResponseSimulator(ResponseSimulator):
     def __init__(self, config, adapter_path: Path | None = None):
-        from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
+        from peft import LoraConfig, PeftModel, get_peft_model
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         self.config = config
@@ -51,9 +51,8 @@ class LoRAResponseSimulator(ResponseSimulator):
             pm.name_or_path, dtype=dtype, attn_implementation=pm.attn_implementation,
             **({"quantization_config": _bnb_config(pm.quantization, dtype), "device_map": {"": 0}} if quant else {}))
         base.config.use_cache = False
-        if quant:  # fp32 norms/embeddings, input grads, and gradient checkpointing if requested
-            base = prepare_model_for_kbit_training(base, use_gradient_checkpointing=pm.gradient_checkpointing)
-        elif pm.gradient_checkpointing:
+        # not prepare_model_for_kbit_training: it upcasts every non-quantized parameter (embeddings, norms) to fp32
+        if pm.gradient_checkpointing:
             base.gradient_checkpointing_enable()
             base.enable_input_require_grads()
         if adapter_path is not None:
